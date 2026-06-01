@@ -41,5 +41,12 @@ def evaluate_model(model, dataloader, device, id2label):
     p = precision_score(all_trues_str, all_preds_str)
     r = recall_score(all_trues_str, all_preds_str)
     f1 = f1_score(all_trues_str, all_preds_str)
+    # 在 evaluate.py 中，对比 pred_str 和 true_str
+    if pred_str != true_str:
+        # 只打印前 5 个看一看
+        # print(f"原句 Token: {tokenizer.convert_ids_to_tokens(input_ids[i])}")
+        print(f"真实标签: {true_str}")
+        print(f"模型预测: {pred_str}")
+        print("-" * 30)
     
     return p, r, f1, acc
