@@ -8,102 +8,63 @@ from models.layers.attention import SelfAttentionLayer
 from models.layers.crf_layer import CRFLayer
 
 class ABSAMainModel(nn.Module):
-    def __init__(self, model_name_or_path, num_tags=7, gcn_out_dim=300, dropout_rate=0.1):
-        """
-        ABSA 端到端主模型初始化 (RoBERTa + Self-Attention + GCN + CRF)
-        
-        :param model_name_or_path: 预训练语言模型的名称或本地路径 (如 'roberta-base')
-        :param num_tags: 序列标注的标签总数 (BIO体系下为 7)
-        :param gcn_out_dim: GCN 聚合后的特征维度 (映射到较低维度以防过拟合)
-        :param dropout_rate: 随机失活率
-        """
+    # 🌟 新增：参数列表里加入 use_gcn 和 use_attn
+    def __init__(self, model_name_or_path, num_tags=7, gcn_out_dim=300, dropout_rate=0.1, use_gcn=True, use_attn=True):
         super(ABSAMainModel, self).__init__()
         
-        # 1. 加载真正的预训练语言模型大脑 (几百MB的参数权重在这里被真正加载)
+        self.use_gcn = use_gcn
+        self.use_attn = use_attn
+        
         print(f"正在加载预训练语言模型权重: {model_name_or_path} ...")
         self.roberta = AutoModel.from_pretrained(model_name_or_path)
-        
-        # 获取预训练模型输出的特征维度 (例如 roberta-base 是 768)
         self.hidden_size = self.roberta.config.hidden_size
         
-        # 2. 实例化自注意力层 (建立长距离语义相关性，对抗可能错误的句法树)
+        # 实例化自注意力层
         self.attention = SelfAttentionLayer(
             hidden_size=self.hidden_size, 
             num_heads=8, 
             dropout_rate=dropout_rate
         )
         
-        # 3. 实例化图卷积层 (将句法邻接矩阵的结构信息强行注入词向量)
+        # 实例化图卷积层
         self.gcn = GCNLayer(
             in_features=self.hidden_size, 
             out_features=gcn_out_dim, 
             dropout_rate=dropout_rate
         )
         
-        # 4. 分类器 / 发射线性层 (Classifier / Emission Layer)
-        # 将 GCN 出来的特征维度 (gcn_out_dim) 映射到标签空间 (num_tags)
-        # 它的输出就是 CRF 所需要的 “发射矩阵 (Emissions)”
-        self.classifier = nn.Linear(gcn_out_dim, num_tags)
+        # 🌟 核心修改：动态适应分类器的输入维度
+        # 如果用 GCN，维度就是 gcn_out_dim (300)；如果不用 GCN，维度就是 roberta 出来的 hidden_size (768)
+        classifier_in_dim = gcn_out_dim if self.use_gcn else self.hidden_size
+        self.classifier = nn.Linear(classifier_in_dim, num_tags)
         
-        # 5. 实例化条件随机场层 (掌控全局标签转移规则的守门员)
         self.crf = CRFLayer(num_tags=num_tags)
-        
         self.dropout = nn.Dropout(dropout_rate)
 
     def forward(self, input_ids, attention_mask, adj_matrix, labels=None):
-        """
-        核心前向传播逻辑 (掌控数据流向)
-        
-        :param input_ids: 词ID序列，形状: [batch_size, seq_len]
-        :param attention_mask: 语言模型注意力掩码，形状: [batch_size, seq_len]
-        :param adj_matrix: 句法依赖邻接矩阵，形状: [batch_size, seq_len, seq_len]
-        :param labels: 真实的BIO标签 (仅在训练时传入)，形状: [batch_size, seq_len]
-        
-        :return: 
-            训练模式下 (labels不为None): 返回 CRF 算出的 Loss 标量
-            预测模式下 (labels为None): 返回维特比解码出的最优标签路径列表 List[List[int]]
-        """
-        
-        # ---------------------------------------------------------
-        # 阶段一：通用语义提取 (RoBERTa)
-        # ---------------------------------------------------------
-        # input_ids & attention_mask: [batch_size, seq_len]
         roberta_outputs = self.roberta(input_ids=input_ids, attention_mask=attention_mask)
-        
-        # last_hidden_state 取出最后一层特征。形状: [batch_size, seq_len, 768]
         sequence_output = roberta_outputs.last_hidden_state
         sequence_output = self.dropout(sequence_output)
         
-        # ---------------------------------------------------------
-        # 阶段二：长距离语义交互 (Self-Attention)
-        # ---------------------------------------------------------
-        # 形状保持不变: [batch_size, seq_len, 768]
-        attn_output = self.attention(sequence_output, attention_mask=attention_mask)
+        # 🌟 根据开关决定是否走 Attention
+        if self.use_attn:
+            attn_output = self.attention(sequence_output, attention_mask=attention_mask)
+        else:
+            attn_output = sequence_output # 关掉就直接短路跳过
+            
+        # 🌟 根据开关决定是否走 GCN
+        if self.use_gcn:
+            final_features = self.gcn(attn_output, adj_matrix)
+        else:
+            final_features = attn_output # 关掉就直接短路跳过
+            
+        # 映射到标签空间
+        emissions = self.classifier(final_features)
         
-        # ---------------------------------------------------------
-        # 阶段三：句法拓扑特征聚合 (GCN)
-        # ---------------------------------------------------------
-        # 传入邻接矩阵进行多维矩阵乘法聚合
-        # 聚合后形状转换为: [batch_size, seq_len, gcn_out_dim]  (例如从 768 降维到 300)
-        gcn_output = self.gcn(attn_output, adj_matrix)
-        
-        # ---------------------------------------------------------
-        # 阶段四：标签空间投影 (Linear)
-        # ---------------------------------------------------------
-        # 映射到标签数。生成发射得分矩阵。形状: [batch_size, seq_len, num_tags]
-        emissions = self.classifier(gcn_output)
-        
-        # ---------------------------------------------------------
-        # 阶段五：根据模式分流 (训练算 Loss / 预测做解码)
-        # ---------------------------------------------------------
         if labels is not None:
-            # 【训练模式】：调用 CRF 计算负对数似然损失
-            # 注意：CRF层需要的 mask 必须和 emissions 形状对齐，直接传入语言模型的 attention_mask 即可
             loss = self.crf(emissions, tags=labels, mask=attention_mask)
             return loss
         else:
-            # 【预测模式】：调用 CRF 的维特比算法解码最优路径
-            # 返回的是一个嵌套列表，例如 [[0, 0, 5, 6, 0], [0, 1, 2, 0, 0]]
             predictions = self.crf.decode(emissions, mask=attention_mask)
             return predictions
 

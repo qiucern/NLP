@@ -1,12 +1,9 @@
 import torch
 from tqdm import tqdm
-# ⚠️ 踢掉 sklearn，换上大名鼎鼎的 seqeval
 from seqeval.metrics import precision_score, recall_score, f1_score, accuracy_score
 
-def evaluate_model(model, dataloader, device, id2label):
-    """
-    注意：传入了一个 id2label 字典，用于把数字 0, 1, 2 转回 'O', 'B-Aspect', 'I-Aspect'
-    """
+# 🌟 新增参数：tokenizer 和 is_test
+def evaluate_model(model, dataloader, device, id2label, tokenizer=None, is_test=False):
     model.eval()
     all_preds_str = []
     all_trues_str = []
@@ -18,35 +15,33 @@ def evaluate_model(model, dataloader, device, id2label):
             adj_matrix = batch['adj_matrix'].to(device)
             labels = batch['labels'].to(device)
             
-            # CRF 解码预测
             batch_preds = model(input_ids, attention_mask, adj_matrix, labels=None)
             
             for i in range(len(batch_preds)):
                 pred_path = batch_preds[i] 
-                # 截断填充，拿到正确的数字序列
                 true_path = labels[i][:len(pred_path)].cpu().numpy().tolist() 
                 
-                # ⚠️ 核心改变：不拉平列表！直接把数字映射回字符串标签！
-                # 假设 pred_path 是 [0, 1, 2, 0], id2label 转换后变成 ['O', 'B-Aspect', 'I-Aspect', 'O']
-                pred_str = [id2label[p] for p in pred_path]
-                true_str = [id2label[t] for t in true_path]
+                pred_str = [id2label.get(p, "O") for p in pred_path]
+                true_str = [id2label.get(t, "O") for t in true_path]
                 
-                # 保持列表的列表（List of Lists）结构
                 all_preds_str.append(pred_str)
                 all_trues_str.append(true_str)
                 
-    # --- 调用 seqeval 计算严苛的实体级指标 ---
+                # 🌟 修复后的核心逻辑：在测试集阶段，发现预测错误，立刻记入文本
+                if is_test and pred_str != true_str and tokenizer is not None:
+                    # 获取原句汉字，去掉无用的占位符
+                    tokens = tokenizer.convert_ids_to_tokens(input_ids[i])
+                    clean_tokens = [t for t in tokens if t not in ['<pad>', '<s>', '</s>', '[PAD]', '[CLS]', '[SEP]']]
+                    
+                    with open("bad_cases_log.txt", "a", encoding="utf-8") as f:
+                        f.write(f"【原句】: {' '.join(clean_tokens)}\n")
+                        f.write(f"【真实】: {true_str}\n")
+                        f.write(f"【预测】: {pred_str}\n")
+                        f.write("-" * 50 + "\n")
+                
     acc = accuracy_score(all_trues_str, all_preds_str)
-    # seqeval 默认就是针对实体跨度（Span）进行计算的
-    p = precision_score(all_trues_str, all_preds_str)
-    r = recall_score(all_trues_str, all_preds_str)
-    f1 = f1_score(all_trues_str, all_preds_str)
-    # 在 evaluate.py 中，对比 pred_str 和 true_str
-    if pred_str != true_str:
-        # 只打印前 5 个看一看
-        # print(f"原句 Token: {tokenizer.convert_ids_to_tokens(input_ids[i])}")
-        print(f"真实标签: {true_str}")
-        print(f"模型预测: {pred_str}")
-        print("-" * 30)
+    p = precision_score(all_trues_str, all_preds_str, zero_division=0)
+    r = recall_score(all_trues_str, all_preds_str, zero_division=0)
+    f1 = f1_score(all_trues_str, all_preds_str, zero_division=0)
     
     return p, r, f1, acc
