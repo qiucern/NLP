@@ -15,15 +15,15 @@ import argparse
 def main():
     parser = argparse.ArgumentParser(description="ABSA GCN-CRF 训练流水线")
     
-    parser.add_argument('--epochs', type=int, default=40, help='训练轮数')
+    parser.add_argument('--epochs', type=int, default=100, help='训练轮数')
     parser.add_argument('--batch_size', type=int, default=32, help='批次大小')
     parser.add_argument('--lr', type=float, default=2e-5, help='RoBERTa 基准学习率')
     parser.add_argument('--gcn_dim', type=int, default=300, help='GCN 的输出维度')
-    parser.add_argument('--num_layers', type=int, default=1, help='GCN 的层数')
+    parser.add_argument('--num_layers', type=int, default=3, help='GCN 的层数')
     parser.add_argument('--dropout', type=float, default=0.1, help='Dropout 比例')
     parser.add_argument('--seed', type=int, default=42, help='全局随机种子')
     
-    # 🌟 消融实验的三大开关
+    # 🌟 消融实验
     parser.add_argument('--use_gcn', type=int, default=1, help='是否使用GCN (1:是, 0:否)')
     parser.add_argument('--use_attn', type=int, default=1, help='是否使用Attention (1:是, 0:否)')
     parser.add_argument('--use_real_adj', type=int, default=1, help='是否使用真实句法树 (1:是, 0:随机矩阵)')
@@ -53,15 +53,15 @@ def main():
     print(f"🚀 [INIT] 设备: {device}")
 
     print("\n📦 正在加载静态数据集...")
-    train_ds = ABSADataset(os.path.join(DATA_JSON,"train.json"), tokenizer_name=TOKENIZER_NAME, max_len=MAX_LEN)
-    val_ds = ABSADataset(os.path.join(DATA_JSON,"val.json"), tokenizer_name=TOKENIZER_NAME, max_len=MAX_LEN)
-    test_ds = ABSADataset(os.path.join(DATA_JSON,"test.json"), tokenizer_name=TOKENIZER_NAME, max_len=MAX_LEN)
+    train_ds = ABSADataset(os.path.join(DATA_JSON,"laptops_train.json"), tokenizer_name=TOKENIZER_NAME, max_len=MAX_LEN)
+    val_ds = ABSADataset(os.path.join(DATA_JSON,"laptops_val.json"), tokenizer_name=TOKENIZER_NAME, max_len=MAX_LEN)
+    test_ds = ABSADataset(os.path.join(DATA_JSON,"laptops_test.json"), tokenizer_name=TOKENIZER_NAME, max_len=MAX_LEN)
 
     train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True)
     val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False)
     test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False)
 
-    # 实例化 Tokenizer (供最后提取错题本使用)
+    # 实例化 Tokenizer
     tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_NAME)
 
     # 实例化模型时，传入开关参数
@@ -110,7 +110,7 @@ def main():
         6: "I-Negative"
     }
 
-    # ================= 训练大循环 =================
+    # ==================================
     for epoch in range(1, EPOCHS + 1):
         print(f"\n{'='*20} Epoch {epoch}/{EPOCHS} {'='*20}")
         
@@ -149,7 +149,6 @@ def main():
             torch.save(model.state_dict(), BEST_MODEL_PATH)
             print(f"🎉 验证集创新高！权重已保存至: {BEST_MODEL_PATH}")
             
-    # ================= 最终盲测阶段 =================
     print("\n" + "*"*40)
     print("🏆 开始测试集最终盲测...")
     model.load_state_dict(torch.load(BEST_MODEL_PATH))
@@ -165,13 +164,14 @@ def main():
     print(f"   - 召回率 (Recall)   : {test_r:.4f}")
     print(f"   - 宏平均 F1 Score   : {test_f1:.4f}")
     
-    # 🌟 记录自动化实验台账 (包含消融开关状态)
     args_dict = {
         "Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "Epochs": EPOCHS,
         "BatchSize": BATCH_SIZE,
         "RoBERTa_LR": LEARNING_RATE,
         "GCN_Dim": GCN_DIM,
+        "GCN_Layers": NUM_LAYERS,
+        "Dropout": DROPOUT,
         "use_GCN": args.use_gcn,
         "use_Attn": args.use_attn,
         "use_Real_Adj": args.use_real_adj
@@ -184,9 +184,9 @@ def main():
         "Test_Recall": f"{test_r:.4f}"
     }
     
-    csv_path = os.path.join(BASE_DIR, "experiment_results.csv")
+    csv_path = os.path.join(BASE_DIR, "experiment_results_self.csv")
     log_experiment_to_csv(csv_path, args_dict, metrics_dict)
-    print(f"\n📁 规范化入账成功！本次实验结果已归档至: {csv_path}")
+    print(f"实验结果记录至: {csv_path}")
 
 if __name__ == "__main__":
     main()

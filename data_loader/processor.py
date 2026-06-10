@@ -70,5 +70,5 @@ if __name__ == "__main__":
     restaurant_data = parse_semeval_xml(restaurant_train_path)
     
     # 保存到 processed 文件夹
-    save_to_json(laptop_data, os.path.abspath(os.path.join(current_dir_path,'..','data','processed','laptops_train.json')))
-    save_to_json(restaurant_data, os.path.abspath(os.path.join(current_dir_path,'..','data','processed','restaurants_train.json')))
+    save_to_json(laptop_data, os.path.abspath(os.path.join(current_dir_path,'..','data','processed','laptops.json')))
+    save_to_json(restaurant_data, os.path.abspath(os.path.join(current_dir_path,'..','data','processed','restaurants.json')))

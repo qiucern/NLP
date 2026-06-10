@@ -124,9 +124,9 @@ def split_offline_data(input_path, output_dir, seed=42):
     
     # 写入硬盘
     splits = {
-        "train.json": train_data,
-        "val.json": val_data,
-        "test.json": test_data
+        "restaurants_train.json": train_data,
+        "restaurants_val.json": val_data,
+        "restaurants_test.json": test_data
     }
     
     for filename, split_data in splits.items():
@@ -141,7 +141,7 @@ if __name__ == "__main__":
     #json 文件
     current_file_path=os.path.abspath(__file__)
     current_dir_path=os.path.dirname(current_file_path)
-    JSON_PATH = os.path.abspath(os.path.join(current_dir_path, "../data/processed/laptops_train.json"))
+    JSON_PATH = os.path.abspath(os.path.join(current_dir_path, "../data/processed/restaurants.json"))
     OUTPUT_DIR = os.path.join(current_dir_path, "..", "data", "processed")
     
     split_offline_data(JSON_PATH, OUTPUT_DIR)
