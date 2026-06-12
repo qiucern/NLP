@@ -11,22 +11,17 @@ from transformers import get_linear_schedule_with_warmup, AutoTokenizer
 from utils.logger import log_experiment_to_csv
 from datetime import datetime
 import argparse
+from models.model_baseline import VanillaRobertaLinear, VanillaRobertaCRF, RobertaBiLSTM_CRF
 
 def main():
     parser = argparse.ArgumentParser(description="ABSA GCN-CRF 训练流水线")
     
-    parser.add_argument('--epochs', type=int, default=20, help='训练轮数')
+    parser.add_argument('--epochs', type=int, default=100, help='训练轮数')
     parser.add_argument('--batch_size', type=int, default=32, help='批次大小')
     parser.add_argument('--lr', type=float, default=2e-5, help='RoBERTa 基准学习率')
-    parser.add_argument('--gcn_dim', type=int, default=300, help='GCN 的输出维度')
-    parser.add_argument('--num_layers', type=int, default=1, help='GCN 的层数')
     parser.add_argument('--dropout', type=float, default=0.1, help='Dropout 比例')
     parser.add_argument('--seed', type=int, default=42, help='全局随机种子')
     
-    # 🌟 消融实验
-    parser.add_argument('--use_gcn', type=int, default=1, help='是否使用GCN (1:是, 0:否)')
-    parser.add_argument('--use_attn', type=int, default=0, help='是否使用Attention (1:是, 0:否)')
-    parser.add_argument('--use_real_adj', type=int, default=1, help='是否使用真实句法树 (1:是, 0:随机矩阵)')
     
     args = parser.parse_args()
 
@@ -34,8 +29,6 @@ def main():
     EPOCHS = args.epochs
     BATCH_SIZE = args.batch_size
     LEARNING_RATE = args.lr
-    GCN_DIM = args.gcn_dim
-    NUM_LAYERS = args.num_layers
     DROPOUT = args.dropout
     SEED = args.seed
 
@@ -53,9 +46,9 @@ def main():
     print(f"🚀 [INIT] 设备: {device}")
 
     print("\n📦 正在加载静态数据集...")
-    train_ds = ABSADataset(os.path.join(DATA_JSON,"laptops_train.json"), tokenizer_name=TOKENIZER_NAME, max_len=MAX_LEN)
-    val_ds = ABSADataset(os.path.join(DATA_JSON,"laptops_val.json"), tokenizer_name=TOKENIZER_NAME, max_len=MAX_LEN)
-    test_ds = ABSADataset(os.path.join(DATA_JSON,"laptops_test.json"), tokenizer_name=TOKENIZER_NAME, max_len=MAX_LEN)
+    train_ds = ABSADataset(os.path.join(DATA_JSON,"restaurants_train.json"), tokenizer_name=TOKENIZER_NAME, max_len=MAX_LEN)
+    val_ds = ABSADataset(os.path.join(DATA_JSON,"restaurants_val.json"), tokenizer_name=TOKENIZER_NAME, max_len=MAX_LEN)
+    test_ds = ABSADataset(os.path.join(DATA_JSON,"restaurants_test.json"), tokenizer_name=TOKENIZER_NAME, max_len=MAX_LEN)
 
     train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True)
     val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False)
@@ -65,48 +58,25 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_NAME)
 
     # 实例化模型时，传入开关参数
-    model = ABSAMainModel(
+    model = VanillaRobertaCRF(
         model_name_or_path=TOKENIZER_NAME, 
         num_tags=NUM_TAGS, 
-        gcn_out_dim=GCN_DIM,
         dropout_rate=DROPOUT,
-        use_gcn=bool(args.use_gcn),
-        use_attn=bool(args.use_attn)
     ).to(device)
-
+    
     # --- 优化器与分层学习率配置 ---
     roberta_params = []
-    gate_params = []
     head_params = []
-    
     for name, param in model.named_parameters():
         if "roberta" in name or "encoder" in name:
             roberta_params.append(param)
-        elif "gate" in name:
-            # 🌟 核心保护：把门控参数单独抓出来
-            gate_params.append(param)
         else:
             head_params.append(param)
             
     optimizer = AdamW([
-        {'params': roberta_params, 'lr': LEARNING_RATE},          # 比如 2e-5
-        {'params': gate_params,    'lr': LEARNING_RATE},          # 必须用基础极小学习率，绝对不能加倍！
-        {'params': head_params,    'lr': LEARNING_RATE * 100}      # 顶层（GCN, Attn, CRF）用 10 倍即可
+        {'params': roberta_params, 'lr': LEARNING_RATE},          
+        {'params': head_params, 'lr': LEARNING_RATE * 100}        
     ])
-    
-    # # --- 优化器与分层学习率配置 ---
-    # roberta_params = []
-    # head_params = []
-    # for name, param in model.named_parameters():
-    #     if "roberta" in name or "encoder" in name:
-    #         roberta_params.append(param)
-    #     else:
-    #         head_params.append(param)
-            
-    # optimizer = AdamW([
-    #     {'params': roberta_params, 'lr': LEARNING_RATE},          
-    #     {'params': head_params, 'lr': LEARNING_RATE * 100}        
-    # ])
     
     total_steps = len(train_loader) * EPOCHS
     warmup_steps = int(total_steps * 0.1)
@@ -137,20 +107,20 @@ def main():
         model.train()
         total_loss = 0
         train_bar = tqdm(train_loader, desc="Training")
-
         
         for batch in train_bar:
             input_ids = batch['input_ids'].to(device)
             attention_mask = batch['attention_mask'].to(device)
-            adj_matrix = batch['adj_matrix'].to(device)
             labels = batch['labels'].to(device)
-            
-            # 🌟 随机矩阵处理：如果关闭真实句法树，直接生成一个随机噪音矩阵来干扰模型
-            if not bool(args.use_real_adj):
-                adj_matrix = torch.rand_like(adj_matrix).to(device)
-            
+            adj_matrix = batch['adj_matrix'].to(device)
+
             optimizer.zero_grad()
-            loss = model(input_ids, attention_mask, adj_matrix, labels=labels)
+            loss = model(
+                input_ids=input_ids, 
+                attention_mask=attention_mask, 
+                labels=labels, 
+                adj_matrix=adj_matrix
+            )
             loss.backward()
             optimizer.step()
             scheduler.step()
@@ -190,12 +160,7 @@ def main():
         "Epochs": EPOCHS,
         "BatchSize": BATCH_SIZE,
         "RoBERTa_LR": LEARNING_RATE,
-        "GCN_Dim": GCN_DIM,
-        "GCN_Layers": NUM_LAYERS,
         "Dropout": DROPOUT,
-        "use_GCN": args.use_gcn,
-        "use_Attn": args.use_attn,
-        "use_Real_Adj": args.use_real_adj
     }
     
     metrics_dict = {
@@ -205,7 +170,7 @@ def main():
         "Test_Recall": f"{test_r:.4f}"
     }
     
-    csv_path = os.path.join(BASE_DIR, "experiment_results_self.csv")
+    csv_path = os.path.join(BASE_DIR, "experiment_results_baseline.csv")
     log_experiment_to_csv(csv_path, args_dict, metrics_dict)
     print(f"实验结果记录至: {csv_path}")
 

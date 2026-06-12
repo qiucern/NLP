@@ -15,7 +15,12 @@ def evaluate_model(model, dataloader, device, id2label, tokenizer=None, is_test=
             adj_matrix = batch['adj_matrix'].to(device)
             labels = batch['labels'].to(device)
             
-            batch_preds = model(input_ids, attention_mask, adj_matrix, labels=None)
+            batch_preds = model(
+                input_ids=input_ids, 
+                attention_mask=attention_mask, 
+                adj_matrix=adj_matrix, 
+                labels=None
+            )
             
             for i in range(len(batch_preds)):
                 pred_path = batch_preds[i] 

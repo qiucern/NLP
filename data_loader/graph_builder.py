@@ -62,6 +62,19 @@ class DependencyGraphBuilder:
                     if token_i.head == token_j or token_j.head == token_i:
                         adj_matrix[i, j] = 1.0
                         adj_matrix[j, i] = 1.0 # ABSA 中通常使用无向图，信息双向流通
+        # 建立 spacy token -> list of roberta indices
+        token_to_roberta = {}
+        for roberta_idx, token in roberta_to_spacy.items():
+            token_to_roberta.setdefault(token, []).append(roberta_idx)
+
+        # 组内全连接：同一单词的子词之间两两相连
+        for indices in token_to_roberta.values():
+            for i in indices:
+                for j in indices:
+                    if i != j:
+                        adj_matrix[i, j] = 1.0
+                        adj_matrix[j, i] = 1.0
+        
                         
         return adj_matrix
 

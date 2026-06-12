@@ -47,14 +47,22 @@ class GCNLayer(nn.Module):
         :return: 图聚合后的新特征矩阵。
                  形状: [batch_size, seq_len, out_features]
         """
-
+        # 1. 确保自环存在（如果已存在，I 叠加会变成 2，但无大碍，后续归一化会处理）
+        I = torch.eye(adj_matrix.size(1), device=adj_matrix.device).unsqueeze(0)
+        adj = adj_matrix + I   # 此时对角线为 2（如果原为1）或 1（原为0）
+        
+        # 2. 对称归一化：D^{-0.5} * A * D^{-0.5}
+        rowsum = adj.sum(dim=-1)   # [batch, seq_len]
+        d_inv_sqrt = torch.pow(rowsum + 1e-9, -0.5)
+        d_mat_inv_sqrt = torch.diag_embed(d_inv_sqrt)
+        norm_adj = d_mat_inv_sqrt @ adj @ d_mat_inv_sqrt
+        
+        # 3. 图卷积
         support = torch.matmul(text_features, self.weight)
-        output = torch.matmul(adj_matrix, support)
+        output = torch.matmul(norm_adj, support)
         output = output + self.bias
         output = torch.relu(output)
-        output = self.dropout(output)
-        
-        return output
+        return self.dropout(output)
 
 # ================= 测试模块 =================
 if __name__ == "__main__":
