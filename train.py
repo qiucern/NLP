@@ -24,7 +24,7 @@ def main():
     parser.add_argument('--seed', type=int, default=42, help='全局随机种子')
     
     # 🌟 消融实验
-    parser.add_argument('--use_gcn', type=int, default=1, help='是否使用GCN (1:是, 0:否)')
+    parser.add_argument('--use_gcn', type=int, default=0, help='是否使用GCN (1:是, 0:否)')
     parser.add_argument('--use_attn', type=int, default=0, help='是否使用Attention (1:是, 0:否)')
     parser.add_argument('--use_real_adj', type=int, default=1, help='是否使用真实句法树 (1:是, 0:随机矩阵)')
     

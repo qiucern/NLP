@@ -31,24 +31,24 @@ class DependencyGraphBuilder:
         # 3. 让 spaCy 解析原始文本，生成包含句法依赖关系的 doc 对象
         doc = self.nlp(text)
         
-        # 4. 【核心对齐算法】：建立 RoBERTa Token 索引 -> spaCy Token 的映射
+        # # 4. 【核心对齐算法】：建立 RoBERTa Token 索引 -> spaCy Token 的映射
         roberta_to_spacy = {}
         
-        for roberta_idx, (start, end) in enumerate(offset_mapping):
-            # 跳过 PAD, CLS, SEP 等特殊标记 (它们的 start 和 end 都是 0)
-            if start == 0 and end == 0:
-                continue
+        # for roberta_idx, (start, end) in enumerate(offset_mapping):
+        #     # 跳过 PAD, CLS, SEP 等特殊标记 (它们的 start 和 end 都是 0)
+        #     if start == 0 and end == 0:
+        #         continue
                 
-            # 遍历 spaCy 切出来的真实单词
-            for spacy_token in doc:
-                spacy_start = spacy_token.idx
-                spacy_end = spacy_start + len(spacy_token)
+        #     # 遍历 spaCy 切出来的真实单词
+        #     for spacy_token in doc:
+        #         spacy_start = spacy_token.idx
+        #         spacy_end = spacy_start + len(spacy_token)
                 
-                # 如果 RoBERTa 碎片的字符区间，落在了 spaCy 单词的字符区间内
-                # 说明这个碎片属于这个单词！
-                if start >= spacy_start and end <= spacy_end:
-                    roberta_to_spacy[roberta_idx] = spacy_token
-                    break # 找到了就跳出内层循环
+        #         # 如果 RoBERTa 碎片的字符区间，落在了 spaCy 单词的字符区间内
+        #         # 说明这个碎片属于这个单词！
+        #         if start >= spacy_start and end <= spacy_end:
+        #             roberta_to_spacy[roberta_idx] = spacy_token
+        #             break # 找到了就跳出内层循环
 
         # 5. 根据 spaCy 的句法树，在矩阵中连线 (打通 GCN 的通道)
         for i in range(max_len):
@@ -112,3 +112,74 @@ if __name__ == "__main__":
     # 验证一下：屏幕(screen)和惊艳(great)是否连通了？
     # 在这个测试里，screen 是第 2 个 Token，great 是第 4 个 Token
     print(f"\n[screen] 和 [great] 是否在句法上直接相连？: {'是' if adj_matrix[2, 4] == 1 else '否'}")
+
+
+
+
+# # ================================================================================================滑窗构图=======================================
+# import numpy as np
+
+# class DependencyGraphBuilder:
+#     def __init__(self, window_size=3):
+#         """
+#         初始化滑窗图构建器
+#         :param window_size: 窗口大小，每个 token 与前后 window_size 个 token 建立边
+#         """
+#         self.window_size = window_size
+#         print(f"使用滑窗模式构建邻接矩阵，窗口大小 = {window_size}")
+
+#     def build_adj_matrix(self, text, offset_mapping, max_len):
+#         """
+#         基于滑窗构建邻接矩阵，忽略 text 和 offset_mapping（仅用于兼容原接口）
+#         :param text: 原始文本（未使用）
+#         :param offset_mapping: 偏移映射（未使用）
+#         :param max_len: 序列最大长度
+#         :return: 形状为 [max_len, max_len] 的 numpy 矩阵
+#         """
+#         # 1. 初始化全零矩阵
+#         adj_matrix = np.zeros((max_len, max_len), dtype=np.float32)
+
+#         # 2. 添加自环
+#         for i in range(max_len):
+#             adj_matrix[i, i] = 1.0
+
+#         # 3. 滑窗建边：每个 token 与前后 window_size 个 token 相连（无向）
+#         for i in range(max_len):
+#             start = max(0, i - self.window_size)
+#             end = min(max_len, i + self.window_size + 1)
+#             for j in range(start, end):
+#                 if i != j:
+#                     adj_matrix[i, j] = 1.0
+#                     adj_matrix[j, i] = 1.0
+
+#         return adj_matrix
+
+
+# # ================= 运行测试模块 =================
+# if __name__ == "__main__":
+#     from transformers import AutoTokenizer
+
+#     tokenizer = AutoTokenizer.from_pretrained("roberta-base", use_fast=True)
+#     text = "The screen is great but the battery is bad."
+#     max_len = 16
+
+#     encoding = tokenizer(
+#         text,
+#         max_length=max_len,
+#         padding='max_length',
+#         truncation=True,
+#         return_offsets_mapping=True
+#     )
+
+#     offset_mapping = encoding['offset_mapping']
+#     builder = DependencyGraphBuilder(window_size=2)   # 窗口大小可调
+#     adj_matrix = builder.build_adj_matrix(text, offset_mapping, max_len)
+
+#     print("\n====== 滑窗邻接矩阵 ======")
+#     print(f"原始文本: {text}")
+#     print(f"切分后的 Tokens: {tokenizer.convert_ids_to_tokens(encoding['input_ids'])}")
+#     print(f"\n矩阵形状: {adj_matrix.shape}")
+#     print(adj_matrix)
+
+#     # 验证：检查 token 1 和 token 3 是否相连（如果窗口大小 >=2 则应该相连）
+#     print(f"\ntoken 1 和 token 3 是否相连？: {'是' if adj_matrix[1, 3] == 1 else '否'}")
